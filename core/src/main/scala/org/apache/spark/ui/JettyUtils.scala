@@ -21,10 +21,11 @@ import java.net.{URI, URL}
 import javax.servlet.DispatcherType
 import javax.servlet.http.{HttpServlet, HttpServletRequest, HttpServletResponse}
 
+import org.apache.spark.deploy.rest.FormCSRFPreventionFilter
+
 import scala.collection.mutable.ArrayBuffer
 import scala.language.implicitConversions
 import scala.xml.Node
-
 import org.eclipse.jetty.server.{Request, Server, ServerConnector}
 import org.eclipse.jetty.server.handler._
 import org.eclipse.jetty.servlet._
@@ -33,8 +34,7 @@ import org.eclipse.jetty.util.component.LifeCycle
 import org.eclipse.jetty.util.thread.QueuedThreadPool
 import org.json4s.JValue
 import org.json4s.jackson.JsonMethods.{pretty, render}
-
-import org.apache.spark.{SecurityManager, SparkConf, SSLOptions}
+import org.apache.spark.{SSLOptions, SecurityManager, SparkConf}
 import org.apache.spark.internal.Logging
 import org.apache.spark.util.Utils
 
@@ -214,6 +214,12 @@ private[spark] object JettyUtils extends Logging {
           handlers.foreach { case(handler) => handler.addFilter(holder, "/*", enumDispatcher) }
         }
     }
+    val csrfFilterHolder = new FilterHolder();
+    val csrfEnumDispatcher = java.util.EnumSet.of(DispatcherType.ASYNC, DispatcherType.ERROR,
+      DispatcherType.FORWARD, DispatcherType.INCLUDE, DispatcherType.REQUEST)
+    csrfFilterHolder.setClassName("org.apache.spark.ui.FormCSRFPreventionFilter")
+    handlers.foreach{case(handler) =>
+      handler.addFilter(csrfFilterHolder, "/app/kill", csrfEnumDispatcher)}
   }
 
   /**

@@ -20,12 +20,11 @@ package org.apache.spark.deploy.master.ui
 import javax.servlet.http.HttpServletRequest
 
 import scala.xml.Node
-
 import org.json4s.JValue
-
 import org.apache.spark.deploy.DeployMessages.{KillDriverResponse, MasterStateResponse, RequestKillDriver, RequestMasterState}
 import org.apache.spark.deploy.JsonProtocol
 import org.apache.spark.deploy.master._
+import org.apache.spark.deploy.rest.FormCSRFPreventionFilter
 import org.apache.spark.ui.{UIUtils, WebUIPage}
 import org.apache.spark.util.Utils
 
@@ -75,6 +74,47 @@ private[ui] class MasterPage(parent: MasterWebUI) extends WebUIPage("") {
     val workers = state.workers.sortBy(_.id)
     val aliveWorkers = state.workers.filter(_.state == WorkerState.ALIVE)
     val workerTable = UIUtils.listingTable(workerHeaders, workerRow, workers)
+
+    val csrfSalt = request.getRequestedSessionId + FormCSRFPreventionFilter.randomStr
+    def appRow(app: ApplicationInfo): Seq[Node] = {
+      val killLink = if (parent.killEnabled &&
+        (app.state == ApplicationState.RUNNING || app.state == ApplicationState.WAITING)) {
+        val confirm =
+          s"if (window.confirm('Are you sure you want to kill application ${app.id} ?')) " +
+            "{ this.parentNode.submit(); return true; } else { return false; }"
+        <form action="app/kill/" method="POST" style="display:inline">
+          <input type="hidden" name="id" value={app.id.toString}/>
+          <input type="hidden" name="terminate" value="true"/>
+          <input type="hidden" name="csrfPreventionSalt" value={csrfSalt}/>
+          <a href="#" onclick={confirm} class="kill-link">(kill)</a>
+        </form>
+      }
+      <tr>
+        <td>
+          <a href={"app?appId=" + app.id}>{app.id}</a>
+          {killLink}
+        </td>
+        <td>
+          {
+          if (app.isFinished) {
+            app.desc.name
+          } else {
+            <a href={app.desc.appUiUrl}>{app.desc.name}</a>
+          }
+          }
+        </td>
+        <td>
+          {app.coresGranted}
+        </td>
+        <td sorttable_customkey={app.desc.memoryPerExecutorMB.toString}>
+          {Utils.megabytesToString(app.desc.memoryPerExecutorMB)}
+        </td>
+        <td>{UIUtils.formatDate(app.submitDate)}</td>
+        <td>{app.desc.user}</td>
+        <td>{app.state.toString}</td>
+        <td>{UIUtils.formatDuration(app.duration)}</td>
+      </tr>
+    }
 
     val appHeaders = Seq("Application ID", "Name", "Cores", "Memory per Node", "Submitted Time",
       "User", "State", "Duration")
@@ -185,45 +225,6 @@ private[ui] class MasterPage(parent: MasterWebUI) extends WebUIPage("") {
         {Utils.megabytesToString(worker.memory)}
         ({Utils.megabytesToString(worker.memoryUsed)} Used)
       </td>
-    </tr>
-  }
-
-  private def appRow(app: ApplicationInfo): Seq[Node] = {
-    val killLink = if (parent.killEnabled &&
-      (app.state == ApplicationState.RUNNING || app.state == ApplicationState.WAITING)) {
-      val confirm =
-        s"if (window.confirm('Are you sure you want to kill application ${app.id} ?')) " +
-          "{ this.parentNode.submit(); return true; } else { return false; }"
-      <form action="app/kill/" method="POST" style="display:inline">
-        <input type="hidden" name="id" value={app.id.toString}/>
-        <input type="hidden" name="terminate" value="true"/>
-        <a href="#" onclick={confirm} class="kill-link">(kill)</a>
-      </form>
-    }
-    <tr>
-      <td>
-        <a href={"app?appId=" + app.id}>{app.id}</a>
-        {killLink}
-      </td>
-      <td>
-        {
-          if (app.isFinished) {
-            app.desc.name
-          } else {
-            <a href={app.desc.appUiUrl}>{app.desc.name}</a>
-          }
-        }
-      </td>
-      <td>
-        {app.coresGranted}
-      </td>
-      <td sorttable_customkey={app.desc.memoryPerExecutorMB.toString}>
-        {Utils.megabytesToString(app.desc.memoryPerExecutorMB)}
-      </td>
-      <td>{UIUtils.formatDate(app.submitDate)}</td>
-      <td>{app.desc.user}</td>
-      <td>{app.state.toString}</td>
-      <td>{UIUtils.formatDuration(app.duration)}</td>
     </tr>
   }
 
