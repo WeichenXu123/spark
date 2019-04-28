@@ -102,14 +102,15 @@ class BinaryFileFormat extends FileFormat with DataSourceRegister {
 
     file: PartitionedFile => {
       val path = new Path(file.filePath)
-      val isPatternMatched = pathGlobPattern.forall(new GlobFilter(_).accept(path))
+
+      // TODO: Improve performance here: each file will recompile the glob pattern here.
+     val isPatternMatched = pathGlobPattern.forall(new GlobFilter(_).accept(path))
 
       // These vals are intentionally lazy to avoid unnecessary file access via short-circuiting.
       lazy val fs = path.getFileSystem(broadcastedHadoopConf.value.value)
       lazy val status = fs.getFileStatus(path)
       lazy val shouldNotFilterOut = filterFuncs.forall(_.apply(status))
 
-      // TODO: Improve performance here: each file will recompile the glob pattern here.
       if (isPatternMatched && shouldNotFilterOut) {
         val writer = new UnsafeRowWriter(requiredSchema.length)
         writer.resetRowWriter()
