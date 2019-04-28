@@ -102,32 +102,33 @@ class BinaryFileFormat extends FileFormat with DataSourceRegister {
 
     file: PartitionedFile => {
       val path = new Path(file.filePath)
+      val isPatternMatched = pathGlobPattern.forall(new GlobFilter(_).accept(path))
+
+      // These vals are intentionally lazy to avoid unnecessary file access via short-circuiting.
+      lazy val fs = path.getFileSystem(broadcastedHadoopConf.value.value)
+      lazy val status = fs.getFileStatus(path)
+      lazy val shouldNotFilterOut = filterFuncs.forall(_.apply(status))
+
       // TODO: Improve performance here: each file will recompile the glob pattern here.
-      if (pathGlobPattern.forall(new GlobFilter(_).accept(path))) {
-        val fs = path.getFileSystem(broadcastedHadoopConf.value.value)
-        val status = fs.getFileStatus(path)
-        if (filterFuncs.forall(_.apply(status))) {
-          val writer = new UnsafeRowWriter(requiredSchema.length)
-          writer.resetRowWriter()
-          requiredSchema.fieldNames.zipWithIndex.foreach {
-            case (PATH, i) => writer.write(i, UTF8String.fromString(status.getPath.toString))
-            case (LENGTH, i) => writer.write(i, status.getLen)
-            case (MODIFICATION_TIME, i) =>
-              writer.write(i, DateTimeUtils.fromMillis(status.getModificationTime))
-            case (CONTENT, i) =>
-              val stream = fs.open(status.getPath)
-              try {
-                writer.write(i, ByteStreams.toByteArray(stream))
-              } finally {
-                Closeables.close(stream, true)
-              }
-            case (other, _) =>
-              throw new RuntimeException(s"Unsupported field name: ${other}")
-          }
-          Iterator.single(writer.getRow)
-        } else {
-          Iterator.empty
+      if (isPatternMatched && shouldNotFilterOut) {
+        val writer = new UnsafeRowWriter(requiredSchema.length)
+        writer.resetRowWriter()
+        requiredSchema.fieldNames.zipWithIndex.foreach {
+          case (PATH, i) => writer.write(i, UTF8String.fromString(status.getPath.toString))
+          case (LENGTH, i) => writer.write(i, status.getLen)
+          case (MODIFICATION_TIME, i) =>
+            writer.write(i, DateTimeUtils.fromMillis(status.getModificationTime))
+          case (CONTENT, i) =>
+            val stream = fs.open(status.getPath)
+            try {
+              writer.write(i, ByteStreams.toByteArray(stream))
+            } finally {
+              Closeables.close(stream, true)
+            }
+          case (other, _) =>
+            throw new RuntimeException(s"Unsupported field name: ${other}")
         }
+        Iterator.single(writer.getRow)
       } else {
         Iterator.empty
       }
